@@ -4,11 +4,12 @@ import * as net from "net";
 console.log("Logs from your program will appear here!");
 
 const server: net.Server = net.createServer((connection: net.Socket) => {
-    // Response for PING command in RESP format
-    const response = "+PONG\r\n";
-    
-    // Send response regardless of input (as per requirements)
-    connection.write(response);
+    // Listen for data on the connection
+    connection.on('data', (_data: Buffer) => {
+        // Send PONG response in RESP format
+        const response = "+PONG\r\n";
+        connection.write(response);
+    });
 });
 
 server.listen(6379, "127.0.0.1");
