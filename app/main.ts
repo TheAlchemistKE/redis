@@ -87,11 +87,13 @@ class RespParser {
 
 class RedisServer {
     private server: net.Server;
+    private storage: Map<string, string>;
 
     constructor() {
         this.server = net.createServer((connection: net.Socket) => {
             this.handleConnection(connection);
         });
+        this.storage = new Map();
     }
 
     private handleConnection(connection: net.Socket) {
@@ -120,6 +122,22 @@ class RedisServer {
                 }
                 const arg = command[1];
                 return `$${arg.length}\r\n${arg}\r\n`;
+            case 'SET':
+                if (command.length < 3) {
+                    return '-ERR wrong number of arguments for \'set\' command\r\n';
+                }
+                const [_, key, value] = command;
+                this.storage.set(key, value);
+                return '+OK\r\n';
+            case 'GET':
+                if (command.length < 2) {
+                    return '-ERR wrong number of arguments for \'get\' command\r\n';
+                }
+                const storedValue = this.storage.get(command[1]);
+                if (storedValue === undefined) {
+                    return '$-1\r\n'; // Null bulk string for non-existent keys
+                }
+                return `$${storedValue.length}\r\n${storedValue}\r\n`;
             default:
                 return `-ERR unknown command '${commandName}'\r\n`;
         }
