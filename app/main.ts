@@ -382,6 +382,7 @@ class RespParser {
 const args = process.argv.slice(2);
 let dir = '/tmp';
 let dbfilename = 'dump.rdb';
+let port = 6379; // Default port
 
 for (let i = 0; i < args.length; i += 2) {
     const arg = args[i];
@@ -391,9 +392,11 @@ for (let i = 0; i < args.length; i += 2) {
         dir = value;
     } else if (arg === '--dbfilename') {
         dbfilename = value;
+    } else if (arg === '--port') {
+        port = parseInt(value, 10);
     }
 }
 
 // Start the server
 const server = new RedisServer({ dir, dbfilename });
-server.listen(6379, "127.0.0.1");
+server.listen(port, "127.0.0.1");
