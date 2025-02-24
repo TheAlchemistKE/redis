@@ -159,6 +159,8 @@ class RedisServer {
     private storage: Map<string, StorageItem>;
     private config: RedisConfig;
     private role: 'master' | 'slave';
+    private masterReplId: string = '8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb';
+    private masterReplOffset: number = 0;
 
     constructor(config: RedisConfig) {
         this.server = net.createServer((connection: net.Socket) => {
@@ -264,7 +266,7 @@ class RedisServer {
                 if (command.length > 1 && command[1].toLowerCase() !== 'replication') {
                     return '-ERR unsupported INFO section';
                 }
-                const response = `role:${this.role}`;
+                const response = `role:${this.role}\nmaster_replid:${this.masterReplId}\nmaster_repl_offset:${this.masterReplOffset}`;
                 return `$${response.length}\r\n${response}\r\n`;
 
             case 'CONFIG':
