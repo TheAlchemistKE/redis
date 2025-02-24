@@ -204,6 +204,10 @@ export class RedisServer {
             case 'REPLCONF':
                 // For both REPLCONF commands (listening-port and capa psync2), respond with OK
                 return '+OK\r\n';
+
+            case 'PSYNC':
+                // Respond with FULLRESYNC, replication ID and offset
+                return `+FULLRESYNC ${this.masterReplId} ${this.masterReplOffset}\r\n`;
                 
             default:
                 return `-ERR unknown command '${commandName}'\r\n`;
