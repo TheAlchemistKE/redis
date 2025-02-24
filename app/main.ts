@@ -254,6 +254,13 @@ class RedisServer {
                 const item = this.storage.get(getKey)!;
                 return `$${item.value.length}\r\n${item.value}\r\n`;
                 
+            case 'INFO':
+                if (command.length > 1 && command[1].toLowerCase() !== 'replication') {
+                    return '-ERR unsupported INFO section';
+                }
+                const response = 'role:master';
+                return `$${response.length}\r\n${response}\r\n`;
+
             case 'CONFIG':
                 if (command.length < 3 || command[1].toUpperCase() !== 'GET') {
                     return '-ERR wrong number of arguments for \'config\' command\r\n';
