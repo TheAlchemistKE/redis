@@ -181,6 +181,11 @@ class RedisServer {
         } catch (error) {
             console.error('Error loading RDB file:', error);
         }
+
+        // If we're a replica, connect to master
+        if (this.config.replicaof) {
+            this.connectToMaster();
+        }
     }
 
     private handleConnection(connection: net.Socket) {
@@ -203,6 +208,25 @@ class RedisServer {
             return false;
         }
         return Date.now() > item.expiryTime;
+    }
+
+    private connectToMaster() {
+        if (!this.config.replicaof) return;
+
+        const client = new net.Socket();
+        client.connect(this.config.replicaof.port, this.config.replicaof.host, () => {
+            // Send PING command in RESP format
+            client.write('*1\r\n$4\r\nPING\r\n');
+        });
+
+        client.on('data', (data) => {
+            // Handle master's response
+            console.log('Received from master:', data.toString());
+        });
+
+        client.on('error', (error) => {
+            console.error('Error connecting to master:', error);
+        });
     }
 
     private handleCommand(command: string[]): string {
