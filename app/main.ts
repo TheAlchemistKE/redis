@@ -212,32 +212,34 @@ class RedisServer {
 
     private connectToMaster() {
         if (!this.config.replicaof) return;
-
+    
         const client = new net.Socket();
         client.connect(this.config.replicaof.port, this.config.replicaof.host, () => {
             // Send PING command in RESP format
             client.write('*1\r\n$4\r\nPING\r\n');
         });
-
+    
         let pingReceived = false;
         let firstReplconfSent = false;
-
+    
         client.on('data', (data) => {
             const response = data.toString();
             console.log('Received from master:', response);
-
+    
             if (!pingReceived && response === '+PONG\r\n') {
                 pingReceived = true;
                 // Send first REPLCONF command (listening-port)
-                const port = this.config.replicaof?.port.toString() || '6380';
-                client.write(`*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$${port.length}\r\n${port}\r\n`);
+                const address = this.server.address();
+                const serverPort = typeof address === 'string' ? '6380' : address?.port?.toString() || '6380';
+                // Format: REPLCONF listening-port <PORT>
+                client.write(`*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$${serverPort.length}\r\n${serverPort}\r\n`);
             } else if (pingReceived && !firstReplconfSent && response === '+OK\r\n') {
                 firstReplconfSent = true;
                 // Send second REPLCONF command (capabilities)
                 client.write('*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n');
             }
         });
-
+    
         client.on('error', (error) => {
             console.error('Error connecting to master:', error);
         });
