@@ -5,15 +5,22 @@ interface StorageItem {
     expiryTime?: number;  // Optional expiry time in milliseconds since epoch
 }
 
+interface RedisConfig {
+    dir: string;
+    dbfilename: string;
+}
+
 class RedisServer {
     private server: net.Server;
     private storage: Map<string, StorageItem>;
+    private config: RedisConfig;
 
-    constructor() {
+    constructor(config: RedisConfig) {
         this.server = net.createServer((connection: net.Socket) => {
             this.handleConnection(connection);
         });
         this.storage = new Map();
+        this.config = config;
     }
 
     private handleConnection(connection: net.Socket) {
@@ -94,6 +101,16 @@ class RedisServer {
                 
                 const item = this.storage.get(getKey)!;
                 return `$${item.value.length}\r\n${item.value}\r\n`;
+                
+            case 'CONFIG':
+                if (command.length < 3 || command[1].toUpperCase() !== 'GET') {
+                    return '-ERR wrong number of arguments for \'config\' command\r\n';
+                }
+                const param = command[2].toLowerCase();
+                if (param === 'dir' || param === 'dbfilename') {
+                    return `*2\r\n$${param.length}\r\n${param}\r\n$${this.config[param].length}\r\n${this.config[param]}\r\n`;
+                }
+                return '$-1\r\n';
                 
             default:
                 return `-ERR unknown command '${commandName}'\r\n`;
@@ -182,6 +199,22 @@ class RespParser {
     }
 }
 
+// Parse command line arguments
+const args = process.argv.slice(2);
+let dir = '/tmp';
+let dbfilename = 'dump.rdb';
+
+for (let i = 0; i < args.length; i += 2) {
+    const arg = args[i];
+    const value = args[i + 1];
+    
+    if (arg === '--dir') {
+        dir = value;
+    } else if (arg === '--dbfilename') {
+        dbfilename = value;
+    }
+}
+
 // Start the server
-const server = new RedisServer();
+const server = new RedisServer({ dir, dbfilename });
 server.listen(6379, "127.0.0.1");
