@@ -12,6 +12,7 @@ export class RedisServer {
     private role: 'master' | 'slave';
     private masterReplId: string = '8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb';
     private masterReplOffset: number = 0;
+    private replicaConnections: Set<net.Socket> = new Set();
 
     constructor(config: RedisConfig) {
         this.server = net.createServer((connection: net.Socket) => {
@@ -44,7 +45,7 @@ export class RedisServer {
             try {
                 const parser = new RespParser(data.toString());
                 const command = parser.parse();
-                const response = this.handleCommand(command);
+                const response = this.handleCommand(command, connection);
                 connection.write(response);
             } catch (error) {
                 console.error('Error processing command:', error);
@@ -53,55 +54,16 @@ export class RedisServer {
         });
     }
 
-    private isExpired(key: string): boolean {
-        const item = this.storage.get(key);
-        if (!item || !item.expiryTime) {
-            return false;
-        }
-        return Date.now() > item.expiryTime;
-    }
-
-    private connectToMaster() {
-        if (!this.config.replicaof) return;
-    
-        const client = new net.Socket();
-        client.connect(this.config.replicaof.port, this.config.replicaof.host, () => {
-            // Send PING command in RESP format
-            client.write('*1\r\n$4\r\nPING\r\n');
-        });
-    
-        let pingReceived = false;
-        let firstReplconfSent = false;
-    
-        client.on('data', (data) => {
-            const response = data.toString();
-            console.log('Received from master:', response);
-    
-            if (!pingReceived && response === '+PONG\r\n') {
-                pingReceived = true;
-                // Send first REPLCONF command (listening-port)
-                const address = this.server.address();
-                const serverPort = typeof address === 'string' ? '6380' : address?.port?.toString() || '6380';
-                // Format: REPLCONF listening-port <PORT>
-                client.write(`*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$${serverPort.length}\r\n${serverPort}\r\n`);
-            } else if (pingReceived && !firstReplconfSent && response === '+OK\r\n') {
-                firstReplconfSent = true;
-                // Send second REPLCONF command (capabilities)
-                client.write('*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n');
-            } else if (firstReplconfSent && response === '+OK\r\n') {
-                // Send PSYNC command with replication ID '?' and offset '-1'
-                client.write('*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n');
-            }
-        });
-    
-        client.on('error', (error) => {
-            console.error('Error connecting to master:', error);
-        });
-    }
-
-    private handleCommand(command: string[]): string {
+    private handleCommand(command: string[], connection: net.Socket): string {
         const commandName = command[0].toUpperCase();
-        
+    
+        // Handle replication-specific commands
+        if (commandName === 'REPLCONF' || commandName === 'PSYNC') {
+            if (commandName === 'PSYNC') {
+                this.replicaConnections.add(connection);
+            }
+        }
+    
         switch (commandName) {
             case 'PING':
                 return '+PONG\r\n';
@@ -133,6 +95,9 @@ export class RedisServer {
                     }
                 }
                 
+                if (this.isWriteCommand(commandName)) {
+                    this.propagateCommand(command);
+                }
                 this.storage.set(key, {
                     value,
                     expiryTime
@@ -209,11 +174,76 @@ export class RedisServer {
                 const fullresyncResponse = Buffer.from(`+FULLRESYNC ${this.masterReplId} ${this.masterReplOffset}\r\n`);
                 const emptyRDBFile = Buffer.from('524544495330303131ff00000000000000000000ff', 'hex');
                 const rdbLength = Buffer.from(`$${emptyRDBFile.length}\r\n`);
+                //@ts-ignore
                 return Buffer.concat([fullresyncResponse, rdbLength, emptyRDBFile]);
                 
             default:
                 return `-ERR unknown command '${commandName}'\r\n`;
         }
+    }
+
+    private isWriteCommand(commandName: string): boolean {
+        return ['SET', 'DEL'].includes(commandName);
+    }
+
+    private propagateCommand(command: string[]) {
+        if (this.replicaConnections.size === 0) return;
+    
+        // Format command as RESP array
+        const respCommand = command.reduce((acc, arg) => {
+            return acc + `$${arg.length}\r\n${arg}\r\n`;
+        }, `*${command.length}\r\n`);
+    
+        // Send to all replicas
+        for (const replica of this.replicaConnections) {
+            replica.write(respCommand);
+        }
+    }
+
+    private isExpired(key: string): boolean {
+        const item = this.storage.get(key);
+        if (!item || !item.expiryTime) {
+            return false;
+        }
+        return Date.now() > item.expiryTime;
+    }
+
+    private connectToMaster() {
+        if (!this.config.replicaof) return;
+    
+        const client = new net.Socket();
+        client.connect(this.config.replicaof.port, this.config.replicaof.host, () => {
+            // Send PING command in RESP format
+            client.write('*1\r\n$4\r\nPING\r\n');
+        });
+    
+        let pingReceived = false;
+        let firstReplconfSent = false;
+    
+        client.on('data', (data) => {
+            const response = data.toString();
+            console.log('Received from master:', response);
+    
+            if (!pingReceived && response === '+PONG\r\n') {
+                pingReceived = true;
+                // Send first REPLCONF command (listening-port)
+                const address = this.server.address();
+                const serverPort = typeof address === 'string' ? '6380' : address?.port?.toString() || '6380';
+                // Format: REPLCONF listening-port <PORT>
+                client.write(`*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$${serverPort.length}\r\n${serverPort}\r\n`);
+            } else if (pingReceived && !firstReplconfSent && response === '+OK\r\n') {
+                firstReplconfSent = true;
+                // Send second REPLCONF command (capabilities)
+                client.write('*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n');
+            } else if (firstReplconfSent && response === '+OK\r\n') {
+                // Send PSYNC command with replication ID '?' and offset '-1'
+                client.write('*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n');
+            }
+        });
+    
+        client.on('error', (error) => {
+            console.error('Error connecting to master:', error);
+        });
     }
 
     listen(port: number, host: string) {
