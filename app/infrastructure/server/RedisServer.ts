@@ -206,8 +206,10 @@ export class RedisServer {
                 return '+OK\r\n';
 
             case 'PSYNC':
-                // Respond with FULLRESYNC, replication ID and offset
-                return `+FULLRESYNC ${this.masterReplId} ${this.masterReplOffset}\r\n`;
+                const fullresyncResponse = Buffer.from(`+FULLRESYNC ${this.masterReplId} ${this.masterReplOffset}\r\n`);
+                const emptyRDBFile = Buffer.from('524544495330303131ff00000000000000000000ff', 'hex');
+                const rdbLength = Buffer.from(`$${emptyRDBFile.length}\r\n`);
+                return Buffer.concat([fullresyncResponse, rdbLength, emptyRDBFile]);
                 
             default:
                 return `-ERR unknown command '${commandName}'\r\n`;
