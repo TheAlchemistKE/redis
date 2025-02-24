@@ -88,6 +88,9 @@ export class RedisServer {
                 firstReplconfSent = true;
                 // Send second REPLCONF command (capabilities)
                 client.write('*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n');
+            } else if (firstReplconfSent && response === '+OK\r\n') {
+                // Send PSYNC command with replication ID '?' and offset '-1'
+                client.write('*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n');
             }
         });
     
