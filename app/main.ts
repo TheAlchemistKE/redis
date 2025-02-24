@@ -3,12 +3,16 @@ import * as fs from "fs";
 
 interface StorageItem {
     value: string;
-    expiryTime?: number;  // Optional expiry time in milliseconds since epoch
+    expiryTime?: number;  
 }
 
 interface RedisConfig {
     dir: string;
     dbfilename: string;
+    replicaof?: {
+        host: string;
+        port: number;
+    };
 }
 
 class RDBParser {
@@ -154,6 +158,7 @@ class RedisServer {
     private server: net.Server;
     private storage: Map<string, StorageItem>;
     private config: RedisConfig;
+    private role: 'master' | 'slave';
 
     constructor(config: RedisConfig) {
         this.server = net.createServer((connection: net.Socket) => {
@@ -161,6 +166,7 @@ class RedisServer {
         });
         this.storage = new Map();
         this.config = config;
+        this.role = config.replicaof ? 'slave' : 'master';
 
         // Try to load RDB file if it exists
         const rdbPath = `${this.config.dir}/${this.config.dbfilename}`;
@@ -258,7 +264,7 @@ class RedisServer {
                 if (command.length > 1 && command[1].toLowerCase() !== 'replication') {
                     return '-ERR unsupported INFO section';
                 }
-                const response = 'role:master';
+                const response = `role:${this.role}`;
                 return `$${response.length}\r\n${response}\r\n`;
 
             case 'CONFIG':
@@ -391,6 +397,8 @@ let dir = '/tmp';
 let dbfilename = 'dump.rdb';
 let port = 6379; // Default port
 
+let replicaof: { host: string; port: number } | undefined;
+
 for (let i = 0; i < args.length; i += 2) {
     const arg = args[i];
     const value = args[i + 1];
@@ -401,9 +409,15 @@ for (let i = 0; i < args.length; i += 2) {
         dbfilename = value;
     } else if (arg === '--port') {
         port = parseInt(value, 10);
+    } else if (arg === '--replicaof') {
+        const [host, replicaPort] = value.split(' ');
+        replicaof = {
+            host,
+            port: parseInt(replicaPort, 10)
+        };
     }
 }
 
 // Start the server
-const server = new RedisServer({ dir, dbfilename });
+const server = new RedisServer({ dir, dbfilename, replicaof });
 server.listen(port, "127.0.0.1");
